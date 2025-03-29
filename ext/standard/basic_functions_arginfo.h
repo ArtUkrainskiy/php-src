@@ -2504,6 +2504,7 @@ ZEND_FUNCTION(headers_sent);
 ZEND_FUNCTION(headers_list);
 ZEND_FUNCTION(htmlspecialchars);
 ZEND_FUNCTION(htmlspecialchars_decode);
+ZEND_FUNCTION(html_entity_decode_old);
 ZEND_FUNCTION(html_entity_decode);
 ZEND_FUNCTION(htmlentities);
 ZEND_FUNCTION(get_html_translation_table);
@@ -3102,6 +3103,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(headers_list, arginfo_headers_list)
 	ZEND_FE(htmlspecialchars, arginfo_htmlspecialchars)
 	ZEND_FE(htmlspecialchars_decode, arginfo_htmlspecialchars_decode)
+	ZEND_FE(html_entity_decode_old, arginfo_html_entity_decode)
 	ZEND_FE(html_entity_decode, arginfo_html_entity_decode)
 	ZEND_FE(htmlentities, arginfo_htmlentities)
 	ZEND_FE(get_html_translation_table, arginfo_get_html_translation_table)

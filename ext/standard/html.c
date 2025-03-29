@@ -808,7 +808,7 @@ static inline size_t write_octet_sequence(unsigned char *buf, enum entity_charse
 /* maximum expansion (factor 1.2) for HTML 5 with &nGt; and &nLt; */
 /* +2 is 1 because of rest (probably unnecessary), 1 because of terminating 0 */
 #define TRAVERSE_FOR_ENTITIES_EXPAND_SIZE(oldlen) ((oldlen) + (oldlen) / 5 + 2)
-static void traverse_for_entities(
+static void traverse_for_entities_old(
 	const char *old,
 	size_t oldlen,
 	zend_string *ret, /* should have allocated TRAVERSE_FOR_ENTITIES_EXPAND_SIZE(olden) */
@@ -918,6 +918,151 @@ invalid_code:
 }
 /* }}} */
 
+/* {{{ traverse_for_entities
+ * Optimized version
+ */
+static void traverse_for_entities(
+	const zend_string *input,
+	zend_string *output, /* should have allocated TRAVERSE_FOR_ENTITIES_EXPAND_SIZE(olden) */
+	const int all,
+	const int flags,
+	const entity_ht *inv_map,
+	const enum entity_charset charset)
+{
+	const char *current_ptr = ZSTR_VAL(input);
+	const char *input_end   = current_ptr + ZSTR_LEN(input); /* terminator address */
+	char *output_ptr		= ZSTR_VAL(output);
+	const int doctype	   = flags & ENT_HTML_DOC_TYPE_MASK;
+
+	while (current_ptr < input_end) {
+		const char *ampersand_ptr = memchr(current_ptr, '&', input_end - current_ptr);
+		if (!ampersand_ptr) {
+			const size_t tail_len = input_end - current_ptr;
+			if (tail_len > 0) {
+				memcpy(output_ptr, current_ptr, tail_len);
+				output_ptr += tail_len;
+			}
+			break;
+		}
+
+		/* Copy everything up to the found '&' */
+		const size_t chunk_len = ampersand_ptr - current_ptr;
+		if (chunk_len > 0) {
+			memcpy(output_ptr, current_ptr, chunk_len);
+			output_ptr += chunk_len;
+		}
+
+		/* Now current_ptr points to the '&' character. */
+		current_ptr = ampersand_ptr;
+
+		/* If there are less than 4 bytes remaining, there isn't enough for an entity – copy '&' as a normal character */
+		if (input_end - current_ptr < 4){
+			const size_t remaining = input_end - current_ptr;
+			memcpy(output_ptr, current_ptr, remaining);
+			output_ptr += remaining;
+			break;
+		}
+
+		unsigned code = 0, code2 = 0;
+		const char *entity_end_ptr = NULL;
+		bool valid_entity = true;
+
+		if (current_ptr[1] == '#') {
+			/* Processing numeric entity */
+			const char *num_start = current_ptr + 2;
+			entity_end_ptr = num_start;
+			if (process_numeric_entity(&entity_end_ptr, &code) == FAILURE) {
+				valid_entity = false;
+			}
+            if (valid_entity && !all && (code > 63U || stage3_table_be_apos_00000[code].data.ent.entity == NULL)) {
+				/* If we're in htmlspecialchars_decode, we're only decoding entities
+				 * that represent &, <, >, " and '. Is this one of them? */
+				valid_entity = false;
+			} else if (valid_entity && (!unicode_cp_is_allowed(code, doctype) ||
+						(doctype == ENT_HTML_DOC_HTML5 && code == 0x0D))) {
+				/* are we allowed to decode this entity in this document type?
+				 * HTML 5 is the only that has a character that cannot be used in
+				 * a numeric entity but is allowed literally (U+000D). The
+				 * unoptimized version would be ... || !numeric_entity_is_allowed(code) */
+				valid_entity = false;
+			}
+		} else {
+			 /* Processing named entity */
+			const char *name_start = current_ptr + 1;
+			/* Search for ';' */
+			const size_t max_search_len = MIN(LONGEST_ENTITY_LENGTH + 1, input_end - name_start);
+			const char *semi_colon_ptr = memchr(name_start, ';', max_search_len);
+			if (!semi_colon_ptr) {
+				valid_entity = false;
+			} else {
+				const size_t name_len = semi_colon_ptr - name_start;
+				if (name_len == 0) {
+					valid_entity = false;
+				} else {
+					if (resolve_named_entity_html(name_start, name_len, inv_map, &code, &code2) == FAILURE) {
+						if (doctype == ENT_HTML_DOC_XHTML && name_len == 4 &&
+							name_start[0] == 'a' && name_start[1] == 'p' &&
+							name_start[2] == 'o' && name_start[3] == 's')
+						{
+							/* uses html4 inv_map, which doesn't include apos;. This is a
+							 * hack to support it */
+							code = (unsigned)'\'';
+						} else {
+							valid_entity = false;
+						}
+					}
+					entity_end_ptr = semi_colon_ptr;
+				}
+			}
+		}
+
+		/* If entity_end_ptr is not found or does not point to ';', consider the entity invalid */
+		if (!valid_entity || entity_end_ptr == NULL || *entity_end_ptr != ';') {
+			*output_ptr++ = *current_ptr++;
+			continue;
+		}
+
+		/* Check if quotes are allowed for entities representing ' or " */
+		if ((code == '\'' && !(flags & ENT_HTML_QUOTE_SINGLE)) ||
+			(code == '"'  && !(flags & ENT_HTML_QUOTE_DOUBLE)))
+		{
+			valid_entity = false;
+		}
+
+		/* UTF-8 doesn't need mapping (ISO-8859-1 doesn't either, but
+		 * the call is needed to ensure the codepoint <= U+00FF)  */
+		if (valid_entity && charset != cs_utf_8) {
+			/* replace unicode code point */
+			if (map_from_unicode(code, charset, &code) == FAILURE || code2 != 0)
+				valid_entity = false;
+		}
+
+		if (valid_entity) {
+			/* Write the parsed entity into the output buffer */
+			output_ptr += write_octet_sequence((unsigned char*)output_ptr, charset, code);
+			if (code2) {
+				output_ptr += write_octet_sequence((unsigned char*)output_ptr, charset, code2);
+			}
+			/* Move current_ptr past the semicolon */
+			current_ptr = entity_end_ptr + 1;
+		} else {
+			/* If the entity is invalid, copy characters from current_ptr up to entity_end_ptr */
+			if (entity_end_ptr) {
+				const size_t len = entity_end_ptr - current_ptr;
+				memcpy(output_ptr, current_ptr, len);
+				output_ptr += len;
+				current_ptr = entity_end_ptr;
+			} else {
+				*output_ptr++ = *current_ptr++;
+			}
+		}
+	}
+
+	*output_ptr = '\0';
+	ZSTR_LEN(output) = (size_t)(output_ptr - ZSTR_VAL(output));
+}
+/* }}} */
+
 /* {{{ unescape_inverse_map */
 static const entity_ht *unescape_inverse_map(int all, int flags)
 {
@@ -999,7 +1144,48 @@ PHPAPI zend_string *php_unescape_html_entities(zend_string *str, int all, int fl
 	inverse_map = unescape_inverse_map(all, flags);
 
 	/* replace numeric entities */
-	traverse_for_entities(ZSTR_VAL(str), ZSTR_LEN(str), ret, all, flags, inverse_map, charset);
+	traverse_for_entities(str, ret, all, flags, inverse_map, charset);
+
+	return ret;
+}
+/* }}} */
+
+/* {{{ php_unescape_html_entities
+ * The parameter "all" should be true to decode all possible entities, false to decode
+ * only the basic ones, i.e., those in basic_entities_ex + the numeric entities
+ * that correspond to quotes.
+ */
+PHPAPI zend_string *php_unescape_html_entities_old(zend_string *str, int all, int flags, const char *hint_charset)
+{
+	zend_string *ret;
+	enum entity_charset charset;
+	const entity_ht *inverse_map;
+	size_t new_size;
+
+	if (!memchr(ZSTR_VAL(str), '&', ZSTR_LEN(str))) {
+		return zend_string_copy(str);
+	}
+
+	if (all) {
+		charset = determine_charset(hint_charset, /* quiet */ 0);
+	} else {
+		charset = cs_8859_1; /* charset shouldn't matter, use ISO-8859-1 for performance */
+	}
+
+	/* don't use LIMIT_ALL! */
+
+	new_size = TRAVERSE_FOR_ENTITIES_EXPAND_SIZE(ZSTR_LEN(str));
+	if (ZSTR_LEN(str) > new_size) {
+		/* overflow, refuse to do anything */
+		return zend_string_copy(str);
+	}
+
+	ret = zend_string_alloc(new_size, 0);
+
+	inverse_map = unescape_inverse_map(all, flags);
+
+	/* replace numeric entities */
+	traverse_for_entities_old(ZSTR_VAL(str), ZSTR_LEN(str), ret, all, flags, inverse_map, charset);
 
 	return ret;
 }
@@ -1367,6 +1553,26 @@ PHP_FUNCTION(html_entity_decode)
 	ZEND_PARSE_PARAMETERS_END();
 
 	replaced = php_unescape_html_entities(
+		str, 1 /*all*/, (int)quote_style, hint_charset ? ZSTR_VAL(hint_charset) : NULL);
+	RETURN_STR(replaced);
+}
+/* }}} */
+
+/* {{{ Convert all HTML entities to their applicable characters */
+PHP_FUNCTION(html_entity_decode_old)
+{
+	zend_string *str, *hint_charset = NULL;
+	zend_long quote_style = ENT_QUOTES|ENT_SUBSTITUTE;
+	zend_string *replaced;
+
+	ZEND_PARSE_PARAMETERS_START(1, 3)
+		Z_PARAM_STR(str)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(quote_style)
+		Z_PARAM_STR_OR_NULL(hint_charset)
+	ZEND_PARSE_PARAMETERS_END();
+
+	replaced = php_unescape_html_entities_old(
 		str, 1 /*all*/, (int)quote_style, hint_charset ? ZSTR_VAL(hint_charset) : NULL);
 	RETURN_STR(replaced);
 }
