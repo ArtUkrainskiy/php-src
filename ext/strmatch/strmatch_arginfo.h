@@ -1,5 +1,5 @@
 /* This is a generated file, edit strmatch.stub.php instead.
- * Stub hash: 966d83f33e5258b884aaa388df4afca941c89d23 */
+ * Stub hash: f35c55ab0c7c6552c199cea78220e580d5da490a */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_Str_Matcher___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, keywords, IS_ARRAY, 0)
@@ -76,19 +76,19 @@ static zend_class_entry *register_class_Str_MatchResult(void)
 	zval property_offset_default_value;
 	ZVAL_UNDEF(&property_offset_default_value);
 	zend_string *property_offset_name = zend_string_init("offset", sizeof("offset") - 1, true);
-	zend_declare_typed_property(class_entry, property_offset_name, &property_offset_default_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_declare_typed_property(class_entry, property_offset_name, &property_offset_default_value, ZEND_ACC_PUBLIC|ZEND_ACC_READONLY, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
 	zend_string_release_ex(property_offset_name, true);
 
 	zval property_length_default_value;
 	ZVAL_UNDEF(&property_length_default_value);
 	zend_string *property_length_name = zend_string_init("length", sizeof("length") - 1, true);
-	zend_declare_typed_property(class_entry, property_length_name, &property_length_default_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_declare_typed_property(class_entry, property_length_name, &property_length_default_value, ZEND_ACC_PUBLIC|ZEND_ACC_READONLY, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
 	zend_string_release_ex(property_length_name, true);
 
 	zval property_keyword_default_value;
 	ZVAL_UNDEF(&property_keyword_default_value);
 	zend_string *property_keyword_name = zend_string_init("keyword", sizeof("keyword") - 1, true);
-	zend_declare_typed_property(class_entry, property_keyword_name, &property_keyword_default_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_STRING));
+	zend_declare_typed_property(class_entry, property_keyword_name, &property_keyword_default_value, ZEND_ACC_PUBLIC|ZEND_ACC_READONLY, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_STRING));
 	zend_string_release_ex(property_keyword_name, true);
 
 	return class_entry;

@@ -24,9 +24,9 @@ class Matcher
 
 final class MatchResult
 {
-    public int $offset;
-    public int $length;
-    public string $keyword;
+    public readonly int $offset;
+    public readonly int $length;
+    public readonly string $keyword;
 }
 
 final class Replacer extends Matcher
