@@ -17,6 +17,7 @@
 #include "config.h"
 #endif
 #include <stddef.h>
+#include <limits.h>
 #include "php_strmatch.h"
 #include "Zend/zend_exceptions.h"
 #include "Zend/zend_interfaces.h"
@@ -66,9 +67,11 @@ static zend_always_inline int ac_goto(const matcher_obj *m, int s, unsigned char
 
 static int ac_newnode(matcher_obj *m) {
     if (m->n == m->cap) {
-        m->cap = m->cap ? m->cap * 2 : 256;
-        m->trans = erealloc(m->trans, (size_t)m->cap * m->asize * sizeof(int));
-        m->meta  = erealloc(m->meta, (size_t)m->cap * sizeof(acmeta));
+        /* guard the signed doubling; safe_erealloc then bails cleanly if the byte size
+           overflows (absurd inputs), instead of integer UB */
+        m->cap = m->cap ? (m->cap > INT_MAX / 2 ? INT_MAX : m->cap * 2) : 256;
+        m->trans = safe_erealloc(m->trans, (size_t)m->cap, m->asize * sizeof(int), 0);
+        m->meta  = safe_erealloc(m->meta, (size_t)m->cap, sizeof(acmeta), 0);
     }
     int *row = &m->trans[(size_t)m->n * m->asize];
     for (int i = 0; i < m->asize; i++) row[i] = -1;
@@ -291,7 +294,7 @@ PHP_METHOD(Str_Matcher, getMatchedKeywords) {
             int w = m->meta[o].wordid;
             if (!seen[w]) {
                 seen[w] = 1;
-                if (nf == cap) { cap = cap ? cap * 2 : 64; first = erealloc(first, cap * sizeof(ac_hit)); }
+                if (nf == cap) { cap = cap ? cap * 2 : 64; first = safe_erealloc(first, cap, sizeof(ac_hit), 0); }
                 /* occurrences of a fixed-length keyword are ordered the same by start
                    and by end, so the first end seen gives the first start */
                 first[nf].off = (zend_long)(i - m->wlen[w] + 1);
@@ -337,7 +340,7 @@ PHP_METHOD(Str_Matcher, matchAll) {
         if (m->meta[o].wordid < 0) o = m->meta[o].out_link;
         while (o >= 0) {
             int w = m->meta[o].wordid;
-            if (nhits == cap) { cap = cap ? cap * 2 : 64; hits = erealloc(hits, cap * sizeof(ac_hit)); }
+            if (nhits == cap) { cap = cap ? cap * 2 : 64; hits = safe_erealloc(hits, cap, sizeof(ac_hit), 0); }
             hits[nhits].off = (zend_long)(i - m->wlen[w] + 1);
             hits[nhits].len = (zend_long)m->wlen[w];
             hits[nhits].wid = w;
@@ -453,7 +456,7 @@ PHP_METHOD(Str_Replacer, replace) {
     const char *t = ZSTR_VAL(subject);
 
     /* best[start] = wordid of the longest keyword occurring at this start, or -1 */
-    int *best = emalloc(tlen * sizeof(int));
+    int *best = safe_emalloc(tlen, sizeof(int), 0);
     memset(best, 0xff, tlen * sizeof(int)); /* -1 */
     int s = 0;
     for (size_t i = 0; i < tlen; i++) {
