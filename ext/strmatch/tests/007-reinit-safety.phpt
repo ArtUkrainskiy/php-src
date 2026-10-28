@@ -1,5 +1,5 @@
 --TEST--
-Str\Matcher: a failed re-construct keeps the previous automaton; Replacer rebuilt via parent ctor is rejected
+Str\Matcher: a failed re-construct keeps the previous automaton; parent ctor is rejected on Replacer
 --EXTENSIONS--
 strmatch
 --FILE--
@@ -9,16 +9,15 @@ $m = new Str\Matcher(['foo']);
 try { $m->__construct(['bar', 123]); } catch (\TypeError $e) { echo "TypeError\n"; }
 var_dump($m->matches('foo'), $m->matches('bar'));
 
-// invoking the parent Str\Matcher constructor on a Replacer leaves no replacements;
-// replace() must reject it, not crash
+// the parent Str\Matcher constructor cannot be run on a Str\Replacer
 $r = new Str\Replacer(['a' => 'b']);
-try {
-    (new ReflectionMethod(Str\Matcher::class, '__construct'))->invoke($r, ['a']);
-    $r->replace('a');
-} catch (\Error $e) { echo $e->getMessage(), "\n"; }
+try { (new ReflectionMethod(Str\Matcher::class, '__construct'))->invoke($r, ['a']); }
+catch (\Error $e) { echo $e->getMessage(), "\n"; }
+echo $r->replace('a'), "\n";
 ?>
 --EXPECT--
 TypeError
 bool(true)
 bool(false)
-Str\Replacer was not initialized with replacements
+Str\Matcher::__construct() cannot be called on a Str\Replacer
+b

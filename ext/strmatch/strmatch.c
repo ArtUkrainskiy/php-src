@@ -169,6 +169,13 @@ PHP_METHOD(Str_Matcher, __construct) {
 
     matcher_obj *m = matcher_from(Z_OBJ_P(ZEND_THIS));
 
+    /* Str\Replacer builds its own state; the parent constructor must not be run on a
+       Replacer (it would leave it able to search but not replace). */
+    if (instanceof_function(Z_OBJCE_P(ZEND_THIS), str_replacer_ce)) {
+        zend_throw_error(NULL, "Str\\Matcher::__construct() cannot be called on a Str\\Replacer");
+        RETURN_THROWS();
+    }
+
     /* Build into locals and swap into the object only on full success, so a failed
        (re)construct throws without destroying a previously built automaton or leaving
        a half-built one (nwords > 0 with no table). */
@@ -181,6 +188,7 @@ PHP_METHOD(Str_Matcher, __construct) {
 
     zval *entry;
     ZEND_HASH_FOREACH_VAL(kw, entry) {
+        ZVAL_DEREF(entry); /* accept a reference whose value is a string */
         if (Z_TYPE_P(entry) != IS_STRING) {
             for (int i = 0; i < nwords; i++) efree(words[i]);
             if (words) efree(words);
@@ -393,6 +401,7 @@ PHP_METHOD(Str_Replacer, __construct) {
 
     zend_string *key; zend_ulong idx; zval *val;
     ZEND_HASH_FOREACH_KEY_VAL(rep, idx, key, val) {
+        ZVAL_DEREF(val); /* accept a reference whose value is a string */
         if (Z_TYPE_P(val) != IS_STRING) {
             for (int i = 0; i < nwords; i++) { efree(words[i]); efree(repl[i]); }
             if (words) { efree(words); efree(wlen); efree(repl); efree(rlen); }
@@ -400,8 +409,9 @@ PHP_METHOD(Str_Replacer, __construct) {
             RETURN_THROWS();
         }
         char ibuf[32]; const char *kstr; size_t klen;
+        /* integer keys stringify signed, like PHP array->string key coercion and strtr */
         if (key) { kstr = ZSTR_VAL(key); klen = ZSTR_LEN(key); }
-        else { klen = snprintf(ibuf, sizeof ibuf, ZEND_ULONG_FMT, idx); kstr = ibuf; }
+        else { klen = snprintf(ibuf, sizeof ibuf, ZEND_LONG_FMT, (zend_long)idx); kstr = ibuf; }
         if (klen == 0) {
             for (int i = 0; i < nwords; i++) { efree(words[i]); efree(repl[i]); }
             if (words) { efree(words); efree(wlen); efree(repl); efree(rlen); }

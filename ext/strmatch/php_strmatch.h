@@ -7,6 +7,6 @@
 extern zend_module_entry strmatch_module_entry;
 #define phpext_strmatch_ptr &strmatch_module_entry
 
-#define PHP_STRMATCH_VERSION "0.7"
+#define PHP_STRMATCH_VERSION "0.8"
 
 #endif /* PHP_STRMATCH_H */
