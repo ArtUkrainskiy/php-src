@@ -105,6 +105,7 @@ ZEND_API uint8_t ZEND_FASTCALL _is_numeric_string_ex(const char *str, size_t len
 
 ZEND_API const char* ZEND_FASTCALL zend_memnstr_ex(const char *haystack, const char *needle, size_t needle_len, const char *end);
 ZEND_API const char* ZEND_FASTCALL zend_memnrstr_ex(const char *haystack, const char *needle, size_t needle_len, const char *end);
+ZEND_API const char* ZEND_FASTCALL zend_memnstr_rare(const char *haystack, const char *needle, size_t needle_len, const char *end);
 
 #if SIZEOF_ZEND_LONG == 4
 #	define ZEND_DOUBLE_FITS_LONG(d) (!((d) > (double)ZEND_LONG_MAX || (d) < (double)ZEND_LONG_MIN))
@@ -185,6 +186,17 @@ static zend_always_inline uint8_t is_numeric_string(const char *str, size_t leng
 
 ZEND_API uint8_t ZEND_FASTCALL is_numeric_str_function(const zend_string *str, zend_long *lval, double *dval);
 
+/* The search anchors memchr on the needle's rarest byte; it falls back to the original
+ * search when no byte is rare (commonness >= ZEND_MEMNSTR_COMMON) or the chosen byte proves
+ * dense in this haystack (a small average gap, re-checked every ZEND_MEMNSTR_SAMPLE hits).
+ * The fallback limits regressions rather than eliminating them: picking the anchor is still
+ * extra work, so a match found early, or a poor anchor choice, adds some overhead. */
+#define ZEND_MEMNSTR_SAMPLE    16  /* hits per window before judging anchor density */
+#define ZEND_MEMNSTR_COMMON    64  /* commonness at/above which a byte is a poor anchor */
+#define ZEND_MEMNSTR_RARE_GAP 133  /* min average gap (bytes) for the anchor to stay worth it */
+#define ZEND_MEMNSTR_MAX_NEEDLE 256 /* above this, scanning the needle for a rare byte does not pay */
+#define ZEND_MEMNSTR_MIN_SPAN  256 /* need at least this many start positions to try a rare anchor */
+
 static zend_always_inline const char *
 zend_memnstr(const char *haystack, const char *needle, size_t needle_len, const char *end)
 {
@@ -205,12 +217,19 @@ zend_memnstr(const char *haystack, const char *needle, size_t needle_len, const 
 		return NULL;
 	}
 
+	if (EXPECTED(needle_len <= ZEND_MEMNSTR_MAX_NEEDLE
+			&& off_s - needle_len >= ZEND_MEMNSTR_MIN_SPAN)) {
+		/* Short enough needle and enough start positions that a rare anchor byte can pay off. */
+		return zend_memnstr_rare(haystack, needle, needle_len, end);
+	}
+
+	/* Too few positions to amortize a rare anchor: the original search unchanged. */
 	if (EXPECTED(off_s < 1024 || needle_len < 9)) {	/* glibc memchr is faster when needle is too short */
 		const char ne = needle[needle_len-1];
-		end -= needle_len;
+		const char *scan_end = end - needle_len;
 
-		while (p <= end) {
-			if ((p = (const char *)memchr(p, *needle, (end-p+1)))) {
+		while (p <= scan_end) {
+			if ((p = (const char *)memchr(p, *needle, (scan_end-p+1)))) {
 				if (ne == p[needle_len-1] && !memcmp(needle+1, p+1, needle_len-2)) {
 					return p;
 				}

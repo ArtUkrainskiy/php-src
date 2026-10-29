@@ -3832,6 +3832,130 @@ process_double:
  * String matching - Sunday algorithm
  * http://www.iti.fh-flensburg.de/lang/algorithmen/pattern/sundayen.htm
  */
+/* Byte commonness in typical text (higher = more common = a worse memchr anchor). */
+static const unsigned char zend_byte_commonness[256] = {
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 40, 50, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	255, 30, 30, 1, 1, 1, 1, 30, 30, 30, 1, 1, 30, 30, 30, 30,
+	70, 70, 70, 70, 70, 70, 70, 70, 70, 70, 30, 30, 1, 1, 1, 30,
+	1, 95, 40, 55, 60, 115, 45, 42, 75, 85, 10, 22, 65, 47, 82, 90,
+	44, 9, 77, 80, 100, 50, 30, 41, 12, 41, 7, 30, 1, 30, 1, 30,
+	1, 190, 80, 110, 120, 230, 90, 85, 150, 170, 20, 45, 130, 95, 165, 180,
+	88, 18, 155, 160, 200, 100, 60, 83, 25, 82, 15, 30, 1, 30, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+};
+
+/* The original search, used as the fallback: memchr on the first byte for a short needle,
+ * the Sunday shift table otherwise. */
+static const char *zend_memnstr_base(const char *haystack, const char *needle, size_t needle_len, const char *end)
+{
+	const char *p = haystack;
+	size_t off_s = (size_t)(end - p);
+
+	if (needle_len > off_s) {
+		return NULL;
+	}
+
+	if (EXPECTED(off_s < 1024 || needle_len < 9)) {
+		const char ne = needle[needle_len - 1];
+		const char *scan_end = end - needle_len;
+
+		while (p <= scan_end) {
+			p = (const char *)memchr(p, *needle, (size_t)(scan_end - p) + 1);
+			if (!p) {
+				return NULL;
+			}
+			if (ne == p[needle_len - 1] && !memcmp(needle + 1, p + 1, needle_len - 2)) {
+				return p;
+			}
+			p++;
+		}
+
+		return NULL;
+	}
+
+	return zend_memnstr_ex(haystack, needle, needle_len, end);
+}
+
+/* Anchor the memchr scan on the needle's rarest byte (per zend_byte_commonness), not the
+ * first. If no byte is rare, or the chosen byte proves dense in this haystack, fall back to
+ * the original search. The normal entry is through zend_memnstr() with 2 <= needle_len <=
+ * end - haystack; the guards below keep it safe as an exported helper. */
+ZEND_API const char* ZEND_FASTCALL zend_memnstr_rare(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
+{
+	size_t anchor = 0, i, hits = 0;
+	unsigned int best;
+	char anchor_c;
+	const char *anchor_end, *p, *window;
+
+	if (UNEXPECTED(needle_len == 0)) {
+		return haystack;
+	}
+	if (UNEXPECTED(needle_len > (size_t)(end - haystack))) {
+		return NULL;
+	}
+	if (UNEXPECTED(needle_len == 1)) {
+		return (const char *)memchr(haystack, *needle, (size_t)(end - haystack));
+	}
+
+	/* Very long needle: scanning it for a rare byte does not pay, and the shift-table
+	 * search already skips far. Use the original search directly. */
+	if (needle_len > ZEND_MEMNSTR_MAX_NEEDLE) {
+		return zend_memnstr_base(haystack, needle, needle_len, end);
+	}
+
+	best = zend_byte_commonness[(unsigned char)needle[0]];
+	for (i = 1; i < needle_len; i++) {
+		unsigned int c = zend_byte_commonness[(unsigned char)needle[i]];
+		if (c < best) {
+			best = c;
+			anchor = i;
+		}
+	}
+
+	/* No byte is rare enough to be a useful anchor: use the original search. */
+	if (best >= ZEND_MEMNSTR_COMMON) {
+		return zend_memnstr_base(haystack, needle, needle_len, end);
+	}
+
+	anchor_c = needle[anchor];
+	anchor_end = (end - needle_len) + anchor; /* last position the anchor byte can sit at */
+	p = haystack + anchor;
+	window = p;
+
+	while (p <= anchor_end) {
+		const char *q = (const char *)memchr(p, anchor_c, (size_t)(anchor_end - p) + 1);
+		const char *cand;
+		if (q == NULL) {
+			return NULL;
+		}
+		cand = q - anchor;
+		if (memcmp(cand, needle, needle_len) == 0) {
+			return cand;
+		}
+		/* Re-judge density every window of hits, so a stretch where the anchor byte turns
+		 * dense hands off to the original search instead of restarting memchr per hit. */
+		if (++hits == ZEND_MEMNSTR_SAMPLE) {
+			if ((size_t)(q - window) < ZEND_MEMNSTR_SAMPLE * ZEND_MEMNSTR_RARE_GAP) {
+				return zend_memnstr_base(cand + 1, needle, needle_len, end);
+			}
+			window = q;
+			hits = 0;
+		}
+		p = q + 1;
+	}
+
+	return NULL;
+}
+/* }}} */
+
 static zend_always_inline void zend_memnstr_ex_pre(unsigned int td[], const char *needle, size_t needle_len, int reverse) /* {{{ */ {
 	int i;
 
