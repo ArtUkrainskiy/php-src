@@ -4,9 +4,8 @@ strpos/str_contains/strstr/substr_count: differential check over randomized inpu
 <?php
 // Compares the substring-search functions against a naive reference over seeded random
 // inputs. The reference uses substr_compare at fixed offsets, so it does not share the
-// search engine under test. Inputs are shaped to exercise needles with and without a rare
-// byte, all-common needles, lengths straddling the internal thresholds, and present/absent
-// matches in haystacks of several sizes.
+// search engine under test. Cover small alphabets, binary strings, varied lengths,
+// present/absent matches, and offsets. These sizes exercise inline and Sunday search.
 
 function naive_pos(string $h, string $n, int $off = 0): int|false {
     $hl = strlen($h); $nl = strlen($n);
@@ -39,7 +38,7 @@ for ($t = 0; $t < 6000; $t++) {
     $alpha = $alphabets[mt_rand(0, count($alphabets) - 1)];
     $n = count($alpha);
 
-    // Haystack size straddles the rare-path routing (64) and the long-needle cap (256).
+    // Include empty, short, and longer inputs up to 2000 bytes.
     $hl = [0, 1, 20, 63, 64, 65, 200, 300, 2000][mt_rand(0, 8)];
     $h = '';
     for ($i = 0; $i < $hl; $i++) { $h .= $alpha[mt_rand(0, $n - 1)]; }

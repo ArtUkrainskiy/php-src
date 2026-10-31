@@ -44,8 +44,7 @@ foreach ([8, 16, 32, 64, 256, 512, 1024] as $length) {
     check_search($dense . $needle . $dense . $needle, $needle);
 }
 
-// SIMD block tails, binary anchors, and nonzero offsets. There are enough
-// false first-byte hits before the match to reach the adaptive search.
+// Short binary inputs and nonzero offsets exercise the inline search.
 foreach ([2, 3, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 255, 256, 257] as $length) {
     $needle = "\x00" . str_repeat('a', $length - 2) . "\xff";
     for ($tail = 0; $tail < 16; $tail++) {
@@ -55,12 +54,50 @@ foreach ([2, 3, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 255, 256, 257] as $len
     }
 }
 
-// Periodic needles require Two-Way's remembered prefix after a period shift.
+// Repeating prefixes with a distinguishing byte, present and absent.
 foreach (['ab', 'abc', 'aab', 'abcabd'] as $period) {
     $needle = str_repeat($period, 40) . 'q' . $period;
     check_search(str_repeat($period, 4000), $needle);
     check_search(str_repeat($period, 4000) . $needle, $needle);
 }
+
+// For a^(length-1)b in an a-only prefix, Sunday advances by two bytes.
+// Sixteen long mismatches hand off at absolute offset 31. Exercise pair
+// block boundaries and all fifteen starts in a partial final block.
+foreach ([32, 33, 63, 64, 65, 255, 256, 257] as $length) {
+    $needle = str_repeat('a', $length - 1) . 'b';
+    $size = 8192 + (($length + 13) % 16);
+    $positions = [31 + 15, 31 + 16, 31 + 17];
+    for ($tail = 0; $tail < 15; $tail++) {
+        $positions[] = $size - $length - $tail;
+    }
+    check_search(str_repeat('a', $size), $needle);
+    foreach ($positions as $position) {
+        $haystack = str_repeat('a', $size);
+        $haystack[$position + $length - 1] = 'b';
+        check_search($haystack, $needle);
+    }
+}
+
+// The same costly prefix reaches the pair filter. Alternating ab then makes
+// pairs dense but the aaab gram selective; aaab makes the gram dense too.
+$needle = str_repeat('a', 31) . 'b';
+$prefix = str_repeat('a', 64) . 'c';
+$selective = substr($prefix . str_repeat('ab', 8192), 0, 16384);
+$dense = substr($prefix . str_repeat('aaab', 4096), 0, 16384);
+$changing = substr($prefix . str_repeat('ab', 4096), 0, 8192)
+    . str_repeat('aaab', 14336);
+foreach ([$selective, $dense, $changing] as $haystack) {
+    check_search($haystack, $needle);
+    check_search(substr_replace($haystack, $needle, -strlen($needle)), $needle);
+}
+
+// A truly periodic needle reaches Two-Way after both filters become dense.
+// A right-half match followed by a left-half mismatch exercises remembered work.
+$needle = str_repeat('ab', 16);
+$haystack = str_repeat('bb' . str_repeat('ab', 15), 2048);
+check_search($haystack, $needle);
+check_search(substr_replace($haystack, 'c' . $needle, -33), $needle);
 
 // The four-byte filter is selective initially and dense later. A late match
 // must survive both the pair-to-gram and gram-to-Two-Way handoffs.
@@ -72,5 +109,5 @@ echo "checked $checked\n";
 echo $failed ? "FAILED ($failed)\n" : "ALL OK\n";
 ?>
 --EXPECT--
-checked 543
+checked 703
 ALL OK

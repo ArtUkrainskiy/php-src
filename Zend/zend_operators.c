@@ -3866,7 +3866,7 @@ static zend_always_inline void zend_memnstr_ex_pre(unsigned int td[], const char
 }
 /* }}} */
 
-static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
+static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday(const char *haystack, const char *needle, size_t needle_len, const char *end)
 {
 	unsigned int td[256];
 	size_t i;
@@ -3898,9 +3898,8 @@ static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday(const cha
 
 	return NULL;
 }
-/* }}} */
 
-static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday_short(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
+static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday_short(const char *haystack, const char *needle, size_t needle_len, const char *end)
 {
 	uint8_t td[256];
 	size_t i;
@@ -3937,7 +3936,6 @@ static zend_never_inline const char* ZEND_FASTCALL zend_memnstr_sunday_short(con
 
 	return NULL;
 }
-/* }}} */
 
 #if defined(__SSE2__)
 /* Byte commonness in typical text (higher = more common = a worse memchr anchor). */
@@ -4201,7 +4199,7 @@ static const char *zend_memnstr_adaptive(const char *haystack,
 
 /* On long needles, switch from Sunday only when failed partial comparisons
  * cost more than the bytes advanced through the haystack. */
-static zend_never_inline const char *zend_memnstr_sunday_adaptive(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
+static zend_never_inline const char *zend_memnstr_sunday_adaptive(const char *haystack, const char *needle, size_t needle_len, const char *end)
 {
 	unsigned int td[256];
 	size_t i;
@@ -4256,9 +4254,8 @@ static zend_never_inline const char *zend_memnstr_sunday_adaptive(const char *ha
 	}
 	return NULL;
 }
-/* }}} */
 
-ZEND_API const char* ZEND_FASTCALL zend_memnstr_ex(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
+ZEND_API const char* ZEND_FASTCALL zend_memnstr_ex(const char *haystack, const char *needle, size_t needle_len, const char *end)
 {
 	/* Keep routing outside the search loops. Short needles use byte-sized
 	 * shifts; adaptive preprocessing is reserved for long scans. */
@@ -4270,7 +4267,6 @@ ZEND_API const char* ZEND_FASTCALL zend_memnstr_ex(const char *haystack, const c
 	}
 	return zend_memnstr_sunday(haystack, needle, needle_len, end);
 }
-/* }}} */
 
 ZEND_API const char* ZEND_FASTCALL zend_memnrstr_ex(const char *haystack, const char *needle, size_t needle_len, const char *end) /* {{{ */
 {
